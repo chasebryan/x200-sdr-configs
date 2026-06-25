@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=RTL-SDR Scanner
+Comment=Survey common RF bands and open a signal report
+Exec=sdr scan
+Terminal=true
+Categories=AudioVideo;HamRadio;Science;

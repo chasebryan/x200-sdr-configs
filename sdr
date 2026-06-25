@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  sdr test
+  sdr fm [frequency]
+  sdr gui
+
+Defaults:
+  frequency = 100e6
+
+Examples:
+  sdr test
+  sdr fm
+  sdr fm 101.1e6
+  sdr gui
+EOF
+}
+
+cmd="${1:-}"
+if [[ -z "$cmd" ]]; then
+  usage
+  exit 1
+fi
+
+shift || true
+
+case "$cmd" in
+  test)
+    if [[ $# -eq 0 ]]; then
+      rc=0
+      timeout 5s rtl_test || rc=$?
+      if [[ $rc -eq 124 ]]; then
+        exit 0
+      fi
+      exit $rc
+    fi
+    exec rtl_test "$@"
+    ;;
+  fm|listen)
+    freq="${1:-100e6}"
+    shift || true
+    rtl_fm -f "$freq" -M wbfm -s 200k -r 48k "$@" | aplay -q -r 48000 -f S16_LE -c 1
+    ;;
+  gui)
+    exec gqrx "$@"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    printf 'Unknown command: %s\n\n' "$cmd" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

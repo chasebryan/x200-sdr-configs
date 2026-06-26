@@ -6,6 +6,83 @@ ROOT="${HOME}/rtl-sdr-setup"
 SCAN_DIR="${ROOT}/scans"
 mkdir -p "$SCAN_DIR"
 
+latest_scan_report() {
+  ls -1t "$SCAN_DIR"/scan-*.txt 2>/dev/null | head -n 1
+}
+
+gqrx_config_dir() {
+  if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
+    printf '%s/gqrx
+' "$XDG_CONFIG_HOME"
+  else
+    printf '%s/.config/gqrx
+' "$HOME"
+  fi
+}
+
+gqrx_config_path() {
+  local name="${1:?}"
+  printf '%s/%s
+' "$(gqrx_config_dir)" "$name"
+}
+
+import_scan_to_bookmarks() {
+  local scan_file="$1"
+  local output_file="$2"
+  python3 - "$scan_file" "$output_file" <<'PY_INNER'
+import re
+import sys
+from pathlib import Path
+
+scan_file = Path(sys.argv[1])
+output_file = Path(sys.argv[2])
+
+bands = {
+    'FM broadcast': ('WFM', 150000, 'Broadcast FM'),
+    'Airband': ('AM', 8000, 'Airband'),
+    'Weather / satellite': ('WFM', 25000, 'Weather'),
+    '2m amateur': ('NFM', 12500, 'Amateur'),
+    'VHF high': ('NFM', 12500, 'VHF'),
+    'UHF public safety': ('NFM', 12500, 'UHF'),
+    '700/800 MHz': ('NFM', 12500, '700MHz'),
+}
+
+lines = scan_file.read_text().splitlines()
+bookmarks = []
+current_band = None
+for line in lines:
+    line = line.strip()
+    if not line:
+        continue
+    if line.startswith('# '):
+        current_band = line[2:].split(' | ')[0]
+        continue
+    m = re.match(r'^([0-9]+\.[0-9]+) MHz\s+(-?[0-9]+\.?[0-9]*) dBm\s+(.*)$', line)
+    if not m:
+        continue
+    freq_hz = int(round(float(m.group(1)) * 1_000_000))
+    band = current_band or 'Survey'
+    modulation, bandwidth, tag = bands.get(band, ('NFM', 12500, 'Survey'))
+    name = f'{band} signal @ {float(m.group(1)):.6f} MHz'
+    bookmarks.append((freq_hz, name, modulation, bandwidth, tag))
+
+with output_file.open('w', encoding='utf-8') as fh:
+    fh.write('# Tag name; color\n')
+    fh.write('Survey; #a0a0a0\n')
+    fh.write('Broadcast FM; #4c8bf5\n')
+    fh.write('Airband; #f4b400\n')
+    fh.write('Weather; #0f9d58\n')
+    fh.write('Amateur; #ab47bc\n')
+    fh.write('VHF; #26a69a\n')
+    fh.write('UHF; #ef5350\n')
+    fh.write('700MHz; #5c6bc0\n')
+    fh.write('\n')
+    fh.write('# Frequency; Name; Modulation; Bandwidth; Tags\n')
+    for freq_hz, name, modulation, bandwidth, tag in bookmarks:
+        fh.write(f'{freq_hz}; {name}; {modulation}; {bandwidth}; {tag}\n')
+PY_INNER
+}
+
 usage() {
   cat <<'EOF_USAGE'
 Usage:
@@ -13,6 +90,7 @@ Usage:
   sdr fm [frequency]
   sdr gui
   sdr scan [seconds-per-band]
+  sdr import-scan [scan-report]
 
 Defaults:
   frequency = 100e6
@@ -22,9 +100,12 @@ Examples:
   sdr test
   sdr fm
   sdr fm 101.1e6
+  sdr weather
+  sdr sarnet
   sdr gui
   sdr scan
   sdr scan 12
+  sdr import-scan
 EOF_USAGE
 }
 
@@ -131,9 +212,30 @@ case "${1:-}" in
     shift || true
     exec rtl_fm -f "$freq" -M wbfm -s 200k -r 48k "$@" | aplay -q -r 48000 -f S16_LE -c 1
     ;;
+  import-scan)
+    shift || true
+    scan_file="${1:-$(latest_scan_report)}"
+    if [[ -z "${scan_file:-}" || ! -f "$scan_file" ]]; then
+      printf '%s
+' 'No scan report found. Run `sdr scan` first.' >&2
+      exit 1
+    fi
+    output_file="$(gqrx_config_path bookmarks.csv)"
+    import_scan_to_bookmarks "$scan_file" "$output_file"
+    printf 'Wrote %s from %s
+' "$output_file" "$scan_file"
+    ;;
   gui)
     shift || true
-    exec gqrx "$@"
+    exec gqrx -c "$(gqrx_config_path default.conf)" "$@"
+    ;;
+  weather)
+    shift || true
+    exec gqrx -c "$(gqrx_config_path noaa.conf)" "$@"
+    ;;
+  sarnet)
+    shift || true
+    exec gqrx -c "$(gqrx_config_path sarnet.conf)" "$@"
     ;;
   scan)
     shift || true

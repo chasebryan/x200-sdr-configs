@@ -2,6 +2,7 @@
 Type=Application
 Name=RTL-SDR Scanner
 Comment=Survey common RF bands and open a signal report
+Icon=/home/ckb/rtl-sdr-setup/rtl-sdr-scan.png
 Exec=sdr scan
 Terminal=true
 Categories=AudioVideo;HamRadio;Science;
